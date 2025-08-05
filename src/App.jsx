@@ -19,7 +19,7 @@ export default function App() {
   const [loading,   setLoading]     = useState(false);
   const [error,     setError]       = useState('');
 
-  // show splash until video ends
+  // Render splash screen until animation finishes
   if (showSplash) {
     return <SplashScreen onFinish={() => setShowSplash(false)} />;
   }
@@ -79,7 +79,7 @@ export default function App() {
       <Navbar />
 
       <div className="relative">
-        {/* side fades */}
+        {/* Gradient fades at sides */}
         <div className="pointer-events-none absolute inset-y-0 left-0 w-32
                         bg-gradient-to-r from-gray-50 to-transparent
                         dark:from-gray-900" />
@@ -97,10 +97,12 @@ export default function App() {
             <>
               <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-100 mb-2">
                 Pick up to 4 Symbols & Date Range
-                <InfoTooltip text="Pick up to 4 tickers (e.g. AAPL). Be sure your start/end dates span at least 60 days—this gives the model enough history to learn price patterns reliably." />
+                <InfoTooltip text="
+Enter up to four tickers (e.g. AAPL). Be sure your start/end dates span at least 80 days—this gives the model enough history to learn price patterns reliably.
+" />
               </h2>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                For accurate forecasts, select a period of **60 days or more**. A longer history helps the model identify trends and avoid overfitting.
+                For accurate forecasts, select a period of <strong>80 days or more</strong>. A longer history helps the model identify trends and avoid overfitting.
               </p>
               {error && <p className="text-red-500 mb-2">{error}</p>}
               <StockForm onSubmit={handleAnalyze} loading={loading} />
@@ -113,11 +115,10 @@ export default function App() {
                 <>
                   <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
                     7-Day Forecast
-                    <InfoTooltip text="Predicted closing prices for each symbol over the next seven days." />
+                    <InfoTooltip text="
+This line chart shows our model’s predicted closing price for each symbol over the next seven days. Helps you anticipate short-term uptrends or downtrends.
+" />
                   </h2>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    The chart displays daily predicted prices—use it to spot upcoming uptrends or downtrends.
-                  </p>
                   <PredictionChartMulti data={analysis} />
                 </>
               ),
@@ -126,11 +127,10 @@ export default function App() {
                 <>
                   <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
                     Normalized vs SPY
-                    <InfoTooltip text="Compares each stock’s performance to the S&P 500 index over the selected period." />
+                    <InfoTooltip text="
+Compares each stock’s performance to the S&P 500 index by scaling every series to 1.0 on the start date. Shows whether stocks out- or under-perform the overall market.
+" />
                   </h2>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Values are scaled so you can see which stocks are stronger or weaker than the overall market.
-                  </p>
                   <NormalizedChart data={analysis} />
                 </>
               ),
@@ -139,11 +139,10 @@ export default function App() {
                 <>
                   <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
                     Summary Statistics
-                    <InfoTooltip text="Key metrics such as average price, volatility, and total return during your chosen window." />
+                    <InfoTooltip text="
+Key metrics like average daily return (Mean), midpoint return (Median), and volatility (Std) over your chosen window. Use these to gauge typical performance and risk.
+" />
                   </h2>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Review these to understand how the stock behaved historically before trusting the forecast.
-                  </p>
                   <StatsTable stats={analysis} />
                 </>
               ),
@@ -152,11 +151,10 @@ export default function App() {
                 <>
                   <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
                     Model Evaluation Scores
-                    <InfoTooltip text="Error metrics showing how well our model predicted past data—lower is better." />
+                    <InfoTooltip text="
+Error metrics (MAE, RMSE, MAPE) showing how well our model predicted past data—lower values mean more accurate forecasts.
+" />
                   </h2>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Check these scores to gauge confidence—smaller errors mean more reliable forecasts.
-                  </p>
                   <EvalTable scores={analysis} />
                 </>
               ),
@@ -165,11 +163,10 @@ export default function App() {
                 <>
                   <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
                     Action Recommendations
-                    <InfoTooltip text="Automated buy/hold/sell suggestions based on the 7-day forecast." />
+                    <InfoTooltip text="
+Automated Buy/Hold/Sell suggestions based on the 7-day forecast: Buy if a rise is predicted, Sell if a drop is forecast, Hold if flat.
+" />
                   </h2>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Use these at a glance to guide your next move.
-                  </p>
                   <ActionTable actions={analysis} />
                 </>
               ),
@@ -178,11 +175,10 @@ export default function App() {
                 <>
                   <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
                     Bollinger Bands
-                    <InfoTooltip text="Shows typical price range (upper/lower bands) plus current price position." />
+                    <InfoTooltip text="
+Displays a moving average plus upper/lower bands at ±2 standard deviations. Prices near the top band may be overbought; near the bottom band, oversold.
+" />
                   </h2>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Prices near the upper band may be overbought; near the lower band, oversold—helping time entries/exits.
-                  </p>
                   <BollingerChart data={analysis} />
                 </>
               ),
@@ -196,8 +192,7 @@ export default function App() {
               >
                 <button
                   onClick={downloadCSV}
-                  className="bg-gradient-to-r from-purple-500 to-indigo-600
-                             text-white px-6 py-3 rounded-lg hover:opacity-90 transition"
+                  className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white px-6 py-3 rounded-lg hover:opacity-90 transition"
                 >
                   Download CSV
                 </button>
@@ -205,9 +200,7 @@ export default function App() {
                   href="https://github.com/adwaith-kalugotla/stock-predictor-react"
                   target="_blank"
                   rel="noreferrer"
-                  className="border border-gray-600 dark:border-gray-400
-                             text-gray-800 dark:text-gray-200 px-6 py-3 rounded-lg
-                             hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+                  className="border border-gray-600 dark:border-gray-400 text-gray-800 dark:text-gray-200 px-6 py-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition"
                 >
                   View Details
                 </a>
@@ -229,8 +222,7 @@ export default function App() {
                 href="https://www.linkedin.com/in/adwaith-kalugotla-68720831a/"
                 target="_blank"
                 rel="noreferrer"
-                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3
-                           rounded-lg transition"
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition"
               >
                 LinkedIn
               </a>
@@ -238,9 +230,7 @@ export default function App() {
                 href="https://github.com/adwaith-kalugotla/stock-predictor-react"
                 target="_blank"
                 rel="noreferrer"
-                className="border border-gray-600 dark:border-gray-400
-                           text-gray-800 dark:text-gray-200 px-6 py-3 rounded-lg
-                           transition"
+                className="border border-gray-600 dark:border-gray-400 text-gray-800 dark:text-gray-200 px-6 py-3 rounded-lg transition"
               >
                 GitHub
               </a>
