@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stock Predictor</title>
+
+    <!-- 1. Load Tailwind via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- 2. Inline Tailwind config to extend your theme -->
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              primary:   '#4F46E5',  // for your navbar, buttons, chart lines
+              secondary: '#ffffff',  // for card & page backgrounds
+              accent:    '#646cff',  // for links, highlights
+              neutral:   '#1a1a1a',  // for body text & borders
+            },
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+            },
+          },
+        },
+      }
+    </script>
+
+    <!-- 3. Import Inter from Google Fonts -->
+    <link 
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" 
+      rel="stylesheet" 
+    />
+  </head>
+  <body class="font-sans bg-secondary text-neutral">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
