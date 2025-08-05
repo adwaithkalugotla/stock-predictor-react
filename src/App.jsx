@@ -19,7 +19,7 @@ export default function App() {
   const [loading,   setLoading]     = useState(false);
   const [error,     setError]       = useState('');
 
-  // while the splash is showing, render only it
+  // show splash until video ends
   if (showSplash) {
     return <SplashScreen onFinish={() => setShowSplash(false)} />;
   }
@@ -79,16 +79,13 @@ export default function App() {
       <Navbar />
 
       <div className="relative">
-        <div
-          className="pointer-events-none absolute inset-y-0 left-0 w-32
-                     bg-gradient-to-r from-gray-50 to-transparent
-                     dark:from-gray-900"
-        />
-        <div
-          className="pointer-events-none absolute inset-y-0 right-0 w-32
-                     bg-gradient-to-l from-gray-50 to-transparent
-                     dark:from-gray-900"
-        />
+        {/* side fades */}
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-32
+                        bg-gradient-to-r from-gray-50 to-transparent
+                        dark:from-gray-900" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-32
+                        bg-gradient-to-l from-gray-50 to-transparent
+                        dark:from-gray-900" />
 
         <motion.main
           initial={{ opacity: 0 }}
@@ -100,8 +97,11 @@ export default function App() {
             <>
               <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-100 mb-2">
                 Pick up to 4 Symbols & Date Range
-                <InfoTooltip text="Enter up to four stock tickers (e.g., AAPL), then select the start and end dates for historical context." />
+                <InfoTooltip text="Pick up to 4 tickers (e.g. AAPL). Be sure your start/end dates span at least 60 days—this gives the model enough history to learn price patterns reliably." />
               </h2>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                For accurate forecasts, select a period of **60 days or more**. A longer history helps the model identify trends and avoid overfitting.
+              </p>
               {error && <p className="text-red-500 mb-2">{error}</p>}
               <StockForm onSubmit={handleAnalyze} loading={loading} />
             </>
@@ -139,10 +139,10 @@ export default function App() {
                 <>
                   <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
                     Summary Statistics
-                    <InfoTooltip text="Key metrics like average price, volatility, and total return in the selected window." />
+                    <InfoTooltip text="Key metrics such as average price, volatility, and total return during your chosen window." />
                   </h2>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Review these numbers to understand historical behavior before trusting the forecast.
+                    Review these to understand how the stock behaved historically before trusting the forecast.
                   </p>
                   <StatsTable stats={analysis} />
                 </>
@@ -152,7 +152,7 @@ export default function App() {
                 <>
                   <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
                     Model Evaluation Scores
-                    <InfoTooltip text="Error metrics showing how well our model predicted past data (lower is better)." />
+                    <InfoTooltip text="Error metrics showing how well our model predicted past data—lower is better." />
                   </h2>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                     Check these scores to gauge confidence—smaller errors mean more reliable forecasts.
@@ -165,10 +165,10 @@ export default function App() {
                 <>
                   <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
                     Action Recommendations
-                    <InfoTooltip text="Simple buy/hold/sell suggestions based on the 7-day forecast." />
+                    <InfoTooltip text="Automated buy/hold/sell suggestions based on the 7-day forecast." />
                   </h2>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Use these to guide your next steps—automated advice you can follow at a glance.
+                    Use these at a glance to guide your next move.
                   </p>
                   <ActionTable actions={analysis} />
                 </>
@@ -178,7 +178,7 @@ export default function App() {
                 <>
                   <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
                     Bollinger Bands
-                    <InfoTooltip text="Shows typical price range (bands) plus where the current price sits inside it." />
+                    <InfoTooltip text="Shows typical price range (upper/lower bands) plus current price position." />
                   </h2>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                     Prices near the upper band may be overbought; near the lower band, oversold—helping time entries/exits.
@@ -216,8 +216,8 @@ export default function App() {
           </AnimatePresence>
 
           <motion.footer
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 1.6, duration: 0.5 }}
             className="mt-16 text-center"
           >
