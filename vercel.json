@@ -1,9 +1,14 @@
 {
+  "version": 2,
+  "devCommand": "vite",
   "functions": {
-    "api/*.py": {
-      "runtime": "python3.12",
+    "api/**/*.py": {
+      "runtime": "python3.11",
       "memory": 1024,
-      "maxDuration": 10
+      "maxDuration": 20
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/analyze", "destination": "/api/analyze" }
+  ]
 }
