@@ -13,8 +13,12 @@ import ActionTable from './components/ActionTable';
 import BollingerChart from './components/BollingerChart';
 import './index.css';
 
-// Use env var in prod; fall back to same-origin /api (works on Vercel)
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+// Prefer an explicit API base (Render) via env; fall back to same-origin /api.
+// We also strip any trailing slashes to avoid //analyze.
+const RAW_API = import.meta.env.VITE_API_URL;
+const API_BASE = (RAW_API && typeof RAW_API === 'string')
+  ? RAW_API.replace(/\/+$/, '')
+  : '/api';
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -37,15 +41,14 @@ export default function App() {
         body: JSON.stringify({ symbols, start, end }),
       });
 
-      // If the function failed (404/500), trying to parse JSON throws the "Unexpected end" error.
-      // So check res.ok first and try to read a short error message if available.
+      // Check status first to avoid "Unexpected end of JSON input"
       if (!res.ok) {
-        let msg = 'Server error';
+        let msg = `Server error (${res.status})`;
         try {
           const maybe = await res.json();
           if (maybe?.error) msg = maybe.error;
         } catch {
-          // ignore parse error; keep generic message
+          /* ignore parse error */
         }
         throw new Error(msg);
       }
@@ -53,7 +56,7 @@ export default function App() {
       const json = await res.json();
       setAnalysis(json);
     } catch (e) {
-      setError(e.message || 'Something went wrong');
+      setError(e?.message || 'Something went wrong');
       setAnalysis(null);
     } finally {
       setLoading(false);
