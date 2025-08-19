@@ -4,6 +4,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_caching import Cache
 
+import os
 import yfinance as yf
 import numpy as np
 import pandas as pd
@@ -11,8 +12,13 @@ from statsmodels.tsa.arima.model import ARIMA
 
 app = Flask(__name__)
 
-# ─── CORS ───────────────────────────────────────────────────────────────────
-CORS(app, resources={r"/analyze": {"origins": "*"}})
+# in app.py, replace your current CORS line with:
+ALLOWED = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+CORS(app, resources={r"/analyze": {"origins": ALLOWED}})
+
+@app.get("/ping")
+def ping():
+    return "pong", 200
 
 # ─── Simple in-memory cache for history fetch ────────────────────────────────
 app.config["CACHE_TYPE"]            = "SimpleCache"

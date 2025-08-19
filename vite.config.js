@@ -6,11 +6,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // Anything that starts with /api -> your local backend
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://127.0.0.1:5000',  // your Flask
         changeOrigin: true,
-        secure: false
-      }
-    }
-  }
+        rewrite: (path) => path.replace(/^\/api/, ''), // /api/analyze -> /analyze
+      },
+    },
+  },
 });
