@@ -16,6 +16,9 @@ app = Flask(__name__)
 ALLOWED = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 CORS(app, resources={r"/analyze": {"origins": ALLOWED}})
 
+print("DEBUG CORS ORIGINS:", ALLOWED)
+
+
 @app.get("/ping")
 def ping():
     return "pong", 200
