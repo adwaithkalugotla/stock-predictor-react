@@ -35,3 +35,10 @@ __pycache__/
 *.pyc
 .env
 .venv/
+# Python cleanup
+__pycache__/
+*.pyc
+.env
+.venv/
+legacy-backend/.venv/
+legacy-backend/services/__pycache__/
