@@ -1,4 +1,4 @@
-# backend/app.py
+# legacy-backend/app.py
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -6,56 +6,73 @@ from flask_caching import Cache
 
 import os
 import signal
-import yfinance as yf
+import platform
+
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.arima.model import ARIMA
+
+from services.market_data import get_close_prices, MarketDataError
 
 
 # ─── Flask Setup ──────────────────────────────────────────────────────────────
 app = Flask(__name__)
 
-# Global CORS (important: even errors will return CORS headers)
+# Global CORS
 ALLOWED = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 CORS(app, resources={r"/*": {"origins": ALLOWED}})
 print("DEBUG CORS ORIGINS:", ALLOWED)
 
 
+# ─── Cache Configuration ──────────────────────────────────────────────────────
+app.config["CACHE_TYPE"] = "SimpleCache"
+app.config["CACHE_DEFAULT_TIMEOUT"] = int(os.getenv("CACHE_TTL_SECONDS", "900"))  # 15 minutes
+cache = Cache(app)
+
+
+# ─── Health Check Routes ──────────────────────────────────────────────────────
+@app.get("/")
+def home():
+    return jsonify({
+        "status": "ok",
+        "service": "stock-predictor-backend",
+        "message": "Backend is running"
+    }), 200
+
+
 @app.get("/ping")
 def ping():
-    """Simple health check endpoint."""
     return "pong", 200
 
 
-# ─── Cache Configuration ──────────────────────────────────────────────────────
-app.config["CACHE_TYPE"] = "SimpleCache"
-app.config["CACHE_DEFAULT_TIMEOUT"] = 300  # 5 minutes
-cache = Cache(app)
+@app.get("/health")
+def health_check():
+    return jsonify({
+        "status": "ok",
+        "service": "stock-predictor-backend"
+    }), 200
 
 
 # ─── Helper Functions ─────────────────────────────────────────────────────────
 @cache.memoize()
-def fetch_close(symbol: str, start: str, end: str) -> pd.Series:
+def fetch_close(symbol: str, start: str, end: str) -> tuple[pd.Series, str]:
     """
-    Fetch 'Close' prices for a ticker, falling back to last 60 days if empty.
+    Fetch Close prices using Polygon first, then yfinance fallback.
+
+    Returns:
+        close_prices, data_source
     """
-    tkr = yf.Ticker(symbol)
     try:
-        if start and end:
-            ed = pd.to_datetime(end) + pd.Timedelta(days=1)  # end is exclusive
-            hist = tkr.history(start=start, end=ed.strftime("%Y-%m-%d"))["Close"]
-            if hist.dropna().empty:
-                hist = tkr.history(period="60d")["Close"]
-        else:
-            hist = tkr.history(period="60d")["Close"]
-        return hist.dropna()
-    except Exception as e:
-        print(f"⚠️ Error fetching {symbol}: {e}")
-        return pd.Series(dtype=float)
+        return get_close_prices(symbol, start, end)
+    except MarketDataError as e:
+        print(f"⚠️ Market data error for {symbol}: {e}")
+        return pd.Series(dtype=float), "failed"
 
 
 def compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    """Compute the 14-day RSI."""
+    """
+    Compute RSI using rolling average gains/losses.
+    """
     delta = series.diff()
     gain = delta.clip(lower=0).rolling(window=period).mean()
     loss = (-delta).clip(lower=0).rolling(window=period).mean()
@@ -63,52 +80,85 @@ def compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
-# Timeout signal for long ARIMA fits
+# ─── Timeout Handling ─────────────────────────────────────────────────────────
 class TimeoutException(Exception):
     pass
 
 
-def handler(signum, frame):
+def timeout_handler(signum, frame):
     raise TimeoutException()
 
 
-signal.signal(signal.SIGALRM, handler)
+SUPPORTS_SIGALRM = platform.system() != "Windows"
+
+if SUPPORTS_SIGALRM:
+    signal.signal(signal.SIGALRM, timeout_handler)
+
+
+def start_arima_timeout(seconds: int = 15):
+    """
+    SIGALRM works on Linux/macOS but not Windows.
+    On Windows, this function does nothing.
+    """
+    if SUPPORTS_SIGALRM:
+        signal.alarm(seconds)
+
+
+def cancel_arima_timeout():
+    """
+    Cancel SIGALRM timeout if supported.
+    """
+    if SUPPORTS_SIGALRM:
+        signal.alarm(0)
 
 
 def analyze_symbol(symbol: str, start: str, end: str, spy0: float) -> dict | None:
     """
-    Analyze a single symbol with technical indicators and ARIMA forecast.
+    Analyze a single symbol with SMA, RSI, Bollinger Bands, normalized comparison,
+    and a lightweight ARIMA forecast.
     """
-    close = fetch_close(symbol, start, end)
+    symbol = symbol.upper().strip()
+    close, data_source = fetch_close(symbol, start, end)
+
     if close.empty:
         print(f"⚠️ No data for {symbol}")
         return None
+
     close.index = pd.to_datetime(close.index)
 
     sma20 = close.rolling(20).mean()
     rsi14 = compute_rsi(close)
-    df = pd.DataFrame({"close": close, "sma20": sma20, "rsi14": rsi14}).dropna()
+
+    df = pd.DataFrame({
+        "close": close,
+        "sma20": sma20,
+        "rsi14": rsi14
+    }).dropna()
 
     if len(df) < 20:
         print(f"⚠️ Insufficient data for {symbol}")
         return None
 
-    # ─── Limit data length and fit lightweight ARIMA ───────────────────────────
+    # ─── ARIMA Forecast ────────────────────────────────────────────────────────
     try:
-        # Limit data length for Render (RAM-safe)
+        # Limit data length for memory safety on free hosting
         if len(df) > 300:
             df = df.tail(300)
 
-        signal.alarm(15)  # 15-second timeout limit
+        start_arima_timeout(15)
 
         mod = ARIMA(df["close"], order=(1, 1, 1))
         res = mod.fit(method_kwargs={"maxiter": 50})
 
-        signal.alarm(0)  # cancel alarm
+        cancel_arima_timeout()
+
     except TimeoutException:
+        cancel_arima_timeout()
         print(f"⏰ ARIMA timed out for {symbol}")
         return None
+
     except Exception as e:
+        cancel_arima_timeout()
         print(f"⚠️ ARIMA failed for {symbol}: {e}")
         return None
 
@@ -121,6 +171,7 @@ def analyze_symbol(symbol: str, start: str, end: str, spy0: float) -> dict | Non
     # ─── 7-Day Forecast ────────────────────────────────────────────────────────
     fc = res.forecast(7)
     last_dt = df.index[-1]
+
     predictions = [
         {
             "date": (last_dt + pd.Timedelta(days=i)).strftime("%Y-%m-%d"),
@@ -130,21 +181,29 @@ def analyze_symbol(symbol: str, start: str, end: str, spy0: float) -> dict | Non
     ]
 
     # ─── Buy/Sell/None Recommendations ─────────────────────────────────────────
-    last_close = df["close"].iat[-1]
+    last_close = float(df["close"].iat[-1])
     actions = {}
+
     for days in (1, 7, 14):
-        price = float(round(fc.iloc[min(days - 1, len(fc) - 1)], 2))
+        forecast_index = min(days - 1, len(fc) - 1)
+        price = float(round(fc.iloc[forecast_index], 2))
+
         if price >= last_close * 1.02:
             act = "Buy"
         elif price <= last_close * 0.98:
             act = "Sell"
         else:
             act = "None"
-        actions[str(days)] = {"price": price, "action": act}
+
+        actions[str(days)] = {
+            "price": price,
+            "action": act
+        }
 
     # ─── Normalized vs SPY ─────────────────────────────────────────────────────
     norm_vals = (close / spy0).round(3).tolist()
     norm_dates = [d.strftime("%Y-%m-%d") for d in close.index]
+
     summary = {
         "mean": float(round(np.mean(norm_vals), 2)),
         "median": float(round(np.median(norm_vals), 2)),
@@ -154,21 +213,28 @@ def analyze_symbol(symbol: str, start: str, end: str, spy0: float) -> dict | Non
     # ─── Bollinger Bands ───────────────────────────────────────────────────────
     roll_sma = close.rolling(20).mean()
     roll_std = close.rolling(20).std()
+
     upper = [
         float(round(v, 2)) if not pd.isna(v) else None
         for v in (roll_sma + 2 * roll_std)
     ]
+
     lower = [
         float(round(v, 2)) if not pd.isna(v) else None
         for v in (roll_sma - 2 * roll_std)
     ]
+
     bb_close = [float(round(x, 2)) for x in close.tolist()]
 
     return {
+        "dataSource": data_source,
         "predictions": predictions,
         "evalScores": eval_scores,
         "actions": actions,
-        "normalized": {"dates": norm_dates, "values": norm_vals},
+        "normalized": {
+            "dates": norm_dates,
+            "values": norm_vals
+        },
         "summaryStats": summary,
         "bollinger": {
             "dates": norm_dates,
@@ -182,30 +248,68 @@ def analyze_symbol(symbol: str, start: str, end: str, spy0: float) -> dict | Non
 # ─── Analyze Route ────────────────────────────────────────────────────────────
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    body = request.get_json() or {}
-    syms = body.get("symbols", [])
-    start = body.get("start")
-    end = body.get("end")
+    try:
+        body = request.get_json() or {}
+        syms = body.get("symbols", [])
+        start = body.get("start")
+        end = body.get("end")
 
-    if not isinstance(syms, list) or not (1 <= len(syms) <= 4):
-        return jsonify({"error": "Provide between 1–4 symbols"}), 400
+        if not isinstance(syms, list) or not (1 <= len(syms) <= 4):
+            return jsonify({
+                "success": False,
+                "error": "Please provide between 1 and 4 stock symbols."
+            }), 400
 
-    all_syms = ["SPY"] + [s.upper() for s in syms]
+        cleaned_syms = []
 
-    spy_hist = fetch_close("SPY", start, end)
-    if spy_hist.empty:
-        return jsonify({"error": "No SPY data"}), 404
-    spy0 = float(spy_hist.iat[0])
+        for sym in syms:
+            if not isinstance(sym, str) or not sym.strip():
+                return jsonify({
+                    "success": False,
+                    "error": "Each stock symbol must be a valid text value."
+                }), 400
 
-    out = {}
-    for sym in all_syms:
-        result = analyze_symbol(sym, start, end, spy0)
-        if result is None:
-            out[sym] = {"error": "Computation failed or timed out"}
-        else:
-            out[sym] = result
+            cleaned_syms.append(sym.upper().strip())
 
-    return jsonify(out)
+        all_syms = ["SPY"] + cleaned_syms
+
+        spy_hist, spy_source = fetch_close("SPY", start, end)
+
+        if spy_hist.empty:
+            return jsonify({
+                "success": False,
+                "error": "Unable to fetch SPY benchmark data. Please try again later."
+            }), 503
+
+        spy0 = float(spy_hist.iat[0])
+
+        out = {
+            "success": True,
+            "data_source": "polygon_primary_yfinance_fallback",
+            "spy_data_source": spy_source,
+            "cache_ttl_seconds": app.config["CACHE_DEFAULT_TIMEOUT"],
+            "results": {}
+        }
+
+        for sym in all_syms:
+            result = analyze_symbol(sym, start, end, spy0)
+
+            if result is None:
+                out["results"][sym] = {
+                    "dataSource": "failed",
+                    "error": "Computation failed, timed out, or not enough market data was available."
+                }
+            else:
+                out["results"][sym] = result
+
+        return jsonify(out), 200
+
+    except Exception as e:
+        print(f"❌ Analyze route failed: {e}")
+        return jsonify({
+            "success": False,
+            "error": "Something went wrong while analyzing the stock data. Please try again."
+        }), 500
 
 
 # ─── Run ──────────────────────────────────────────────────────────────────────
@@ -213,4 +317,9 @@ if __name__ == "__main__":
     print("\n=== URL MAP ===")
     print(app.url_map)
     print("================\n")
-    app.run(port=5000, debug=True)
+
+    app.run(
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "5000")),
+        debug=True
+    )
