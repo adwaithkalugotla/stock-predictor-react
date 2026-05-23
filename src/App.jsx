@@ -14,20 +14,28 @@ import BollingerChart from './components/BollingerChart';
 import './index.css';
 
 // 🔧 Base API configuration
+// Local dev should use Flask on localhost.
+// Production should use VITE_API_URL from Vercel environment variables.
 const RAW_API = import.meta.env.VITE_API_URL;
-const API_BASE = (RAW_API && typeof RAW_API === 'string')
-  ? RAW_API.replace(/\/+$/, '')   // remove trailing slashes
-  : 'https://stock-predictor-react.onrender.com';  // fallback for production
+
+const API_BASE = RAW_API && typeof RAW_API === 'string'
+  ? RAW_API.replace(/\/+$/, '')
+  : import.meta.env.DEV
+    ? 'http://127.0.0.1:5000'
+    : 'https://stock-predictor-react.onrender.com';
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [analysis, setAnalysis] = useState(null);
+  const [metadata, setMetadata] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleAnalyze = async ({ symbols, start, end }) => {
     setError('');
     setLoading(true);
+    setAnalysis(null);
+    setMetadata(null);
 
     try {
       const res = await fetch(`${API_BASE}/analyze`, {
@@ -35,27 +43,47 @@ export default function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        // 🚀 ensure payload is clean JSON
         body: JSON.stringify({ symbols, start, end }),
       });
 
-      if (!res.ok) {
-        let msg = `Server error (${res.status})`;
-        try {
-          const maybe = await res.json();
-          if (maybe?.error) msg = maybe.error;
-        } catch (_) {
-          /* ignore */
-        }
-        throw new Error(msg);
+      let json;
+
+      try {
+        json = await res.json();
+      } catch (_) {
+        throw new Error('Backend returned an invalid response. Please try again.');
       }
 
-      const json = await res.json();
-      setAnalysis(json);
+      if (!res.ok || json?.success === false) {
+        throw new Error(json?.error || `Server error (${res.status})`);
+      }
+
+      // Backend now returns:
+      // {
+      //   success: true,
+      //   results: { AAPL: {...}, SPY: {...} }
+      // }
+      //
+      // Existing chart components expect:
+      // { AAPL: {...}, SPY: {...} }
+      const normalizedResults = json?.results || json;
+
+      if (!normalizedResults || Object.keys(normalizedResults).length === 0) {
+        throw new Error('No analysis results were returned.');
+      }
+
+      setAnalysis(normalizedResults);
+
+      setMetadata({
+        dataSource: json?.data_source || 'unknown',
+        spyDataSource: json?.spy_data_source || 'unknown',
+        cacheTtlSeconds: json?.cache_ttl_seconds || null,
+      });
     } catch (err) {
       console.error('Fetch failed:', err);
-      setError('Failed to fetch. Please try again.');
+      setError(err.message || 'Failed to fetch analysis. Please try again.');
       setAnalysis(null);
+      setMetadata(null);
     } finally {
       setLoading(false);
     }
@@ -94,10 +122,29 @@ export default function App() {
                 Pick up to 4 Symbols & Date Range
                 <InfoTooltip text="Enter up to four tickers (e.g., AAPL). Ensure your start/end dates span at least 80 days for accurate forecasting." />
               </h2>
+
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                 For accurate forecasts, select a period of <strong>80 days or more</strong>. A longer history helps the model identify trends and avoid overfitting.
               </p>
-              {error && <p className="text-red-500 mb-2">{error}</p>}
+
+              {error && (
+                <div className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+                  {error}
+                </div>
+              )}
+
+              {metadata && (
+                <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300">
+                  Data pipeline: {metadata.dataSource}
+                  {metadata.spyDataSource && (
+                    <> | SPY source: {metadata.spyDataSource}</>
+                  )}
+                  {metadata.cacheTtlSeconds && (
+                    <> | Cache: {metadata.cacheTtlSeconds}s</>
+                  )}
+                </div>
+              )}
+
               <StockForm onSubmit={handleAnalyze} loading={loading} />
             </>
           )}
@@ -159,6 +206,7 @@ export default function App() {
             <h2 className="text-2xl font-bold mb-4 text-gray-800 dark:text-gray-100">
               Let’s Connect
             </h2>
+
             <div className="flex justify-center gap-4">
               <a
                 href="https://www.linkedin.com/in/adwaith-kalugotla-68720831a/"
@@ -168,6 +216,7 @@ export default function App() {
               >
                 LinkedIn
               </a>
+
               <a
                 href="https://github.com/adwaithKalugotla/stock-predictor-react"
                 target="_blank"
