@@ -18,8 +18,19 @@ from services.market_data import get_close_prices, MarketDataError
 # ─── Flask Setup ──────────────────────────────────────────────────────────────
 app = Flask(__name__)
 
+
 # Global CORS
-ALLOWED = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
+
+ALLOWED = [
+    origin.strip().rstrip("/")
+    for origin in raw_origins.replace("\n", ",").replace("\r", ",").split(",")
+    if origin.strip()
+]
+
+if not ALLOWED:
+    ALLOWED = ["*"]
+
 CORS(app, resources={r"/*": {"origins": ALLOWED}})
 print("DEBUG CORS ORIGINS:", ALLOWED)
 
@@ -42,7 +53,10 @@ def home():
 
 @app.get("/ping")
 def ping():
-    return "pong", 200
+    return jsonify({
+        "status": "ok",
+        "message": "pong"
+    }), 200
 
 
 @app.get("/health")
