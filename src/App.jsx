@@ -30,9 +30,11 @@ export default function App() {
   const [metadata, setMetadata] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
 
   const handleAnalyze = async ({ symbols, start, end }) => {
     setError('');
+    setWarning('');
     setLoading(true);
     setAnalysis(null);
     setMetadata(null);
@@ -58,21 +60,84 @@ export default function App() {
         throw new Error(json?.error || `Server error (${res.status})`);
       }
 
-      // Backend now returns:
+      // Backend returns:
       // {
       //   success: true,
-      //   results: { AAPL: {...}, SPY: {...} }
+      //   results: {
+      //     AAPL: { predictions: [...], ... },
+      //     INVALID: { error: "..." }
+      //   }
       // }
       //
-      // Existing chart components expect:
-      // { AAPL: {...}, SPY: {...} }
-      const normalizedResults = json?.results || json;
+      // Chart components should only receive valid result objects.
+      const rawResults = json?.results || json;
 
-      if (!normalizedResults || Object.keys(normalizedResults).length === 0) {
+      if (!rawResults || Object.keys(rawResults).length === 0) {
         throw new Error('No analysis results were returned.');
       }
 
-      setAnalysis(normalizedResults);
+      const validResults = {};
+      const failedSymbols = [];
+
+      Object.entries(rawResults).forEach(([symbol, result]) => {
+        const hasValidForecast =
+          result &&
+          Array.isArray(result.predictions) &&
+          result.predictions.length > 0;
+
+        const hasRequiredChartData =
+          result?.normalized &&
+          result?.summaryStats &&
+          result?.evalScores &&
+          result?.actions &&
+          result?.bollinger;
+
+        const hasError = Boolean(result?.error);
+
+        if (hasValidForecast && hasRequiredChartData && !hasError) {
+          validResults[symbol] = result;
+        } else {
+          failedSymbols.push(symbol);
+        }
+      });
+
+      const requestedSymbols = Array.isArray(symbols)
+        ? symbols.map((s) => String(s).toUpperCase().trim()).filter(Boolean)
+        : [];
+
+      const validRequestedSymbols = requestedSymbols.filter(
+        (symbol) => validResults[symbol]
+      );
+
+      if (validRequestedSymbols.length === 0) {
+        throw new Error(
+          `No valid stock data found for: ${requestedSymbols.join(', ')}. Please check the ticker symbol and try again.`
+        );
+      }
+
+      const chartResults = {};
+
+      // Keep SPY if backend returned it successfully, because your charts use it
+      // for benchmark comparison.
+      if (validResults.SPY) {
+        chartResults.SPY = validResults.SPY;
+      }
+
+      validRequestedSymbols.forEach((symbol) => {
+        chartResults[symbol] = validResults[symbol];
+      });
+
+      const visibleFailedSymbols = failedSymbols.filter(
+        (symbol) => symbol !== 'SPY' && requestedSymbols.includes(symbol)
+      );
+
+      if (visibleFailedSymbols.length > 0) {
+        setWarning(
+          `Some symbols could not be analyzed: ${visibleFailedSymbols.join(', ')}. Please check the ticker symbol and try again.`
+        );
+      }
+
+      setAnalysis(chartResults);
 
       setMetadata({
         dataSource: json?.data_source || 'unknown',
@@ -133,6 +198,12 @@ export default function App() {
                 </div>
               )}
 
+              {warning && (
+                <div className="mb-4 rounded-xl border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950 dark:text-yellow-300">
+                  {warning}
+                </div>
+              )}
+
               {metadata && (
                 <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300">
                   Data pipeline: {metadata.dataSource}
@@ -152,47 +223,59 @@ export default function App() {
           <AnimatePresence>
             {analysis && (
               <>
-                {section(2, <>
-                  <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
-                    7-Day Forecast
-                  </h2>
-                  <PredictionChartMulti data={analysis} />
-                </>)}
+                {section(2, (
+                  <>
+                    <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
+                      7-Day Forecast
+                    </h2>
+                    <PredictionChartMulti data={analysis} />
+                  </>
+                ))}
 
-                {section(3, <>
-                  <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
-                    Normalized vs SPY
-                  </h2>
-                  <NormalizedChart data={analysis} />
-                </>)}
+                {section(3, (
+                  <>
+                    <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
+                      Normalized vs SPY
+                    </h2>
+                    <NormalizedChart data={analysis} />
+                  </>
+                ))}
 
-                {section(4, <>
-                  <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
-                    Summary Statistics
-                  </h2>
-                  <StatsTable stats={analysis} />
-                </>)}
+                {section(4, (
+                  <>
+                    <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
+                      Summary Statistics
+                    </h2>
+                    <StatsTable stats={analysis} />
+                  </>
+                ))}
 
-                {section(5, <>
-                  <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
-                    Model Evaluation Scores
-                  </h2>
-                  <EvalTable scores={analysis} />
-                </>)}
+                {section(5, (
+                  <>
+                    <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
+                      Model Evaluation Scores
+                    </h2>
+                    <EvalTable scores={analysis} />
+                  </>
+                ))}
 
-                {section(6, <>
-                  <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
-                    Action Recommendations
-                  </h2>
-                  <ActionTable actions={analysis} />
-                </>)}
+                {section(6, (
+                  <>
+                    <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
+                      Action Recommendations
+                    </h2>
+                    <ActionTable actions={analysis} />
+                  </>
+                ))}
 
-                {section(7, <>
-                  <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
-                    Bollinger Bands
-                  </h2>
-                  <BollingerChart data={analysis} />
-                </>)}
+                {section(7, (
+                  <>
+                    <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-1">
+                      Bollinger Bands
+                    </h2>
+                    <BollingerChart data={analysis} />
+                  </>
+                ))}
               </>
             )}
           </AnimatePresence>
