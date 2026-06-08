@@ -19,7 +19,7 @@ from services.market_data import get_close_prices, MarketDataError
 app = Flask(__name__)
 
 
-# Global CORS
+# ─── Global CORS ──────────────────────────────────────────────────────────────
 raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
 
 ALLOWED = [
@@ -94,6 +94,145 @@ def compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
+def build_signal_recommendations(
+    close: pd.Series,
+    df: pd.DataFrame,
+    forecast: pd.Series
+) -> dict:
+    """
+    Build Buy/Sell/Hold recommendations with confidence scores.
+
+    Uses:
+    - ARIMA forecast expected return
+    - RSI
+    - 20-day SMA
+    - Bollinger Band position
+    """
+    last_close = float(df["close"].iat[-1])
+    last_sma20 = float(df["sma20"].iat[-1])
+    last_rsi14 = float(df["rsi14"].iat[-1])
+
+    latest_roll_sma = close.rolling(20).mean()
+    latest_roll_std = close.rolling(20).std()
+    latest_upper_band = latest_roll_sma + 2 * latest_roll_std
+    latest_lower_band = latest_roll_sma - 2 * latest_roll_std
+
+    valid_upper = latest_upper_band.dropna()
+    valid_lower = latest_lower_band.dropna()
+
+    if valid_upper.empty or valid_lower.empty:
+        last_upper_band = None
+        last_lower_band = None
+    else:
+        last_upper_band = float(valid_upper.iat[-1])
+        last_lower_band = float(valid_lower.iat[-1])
+
+    actions = {}
+
+    for days in (1, 7, 14):
+        forecast_index = min(days - 1, len(forecast) - 1)
+        forecast_price = float(round(forecast.iloc[forecast_index], 2))
+
+        expected_return = ((forecast_price - last_close) / last_close) * 100
+
+        bullish_score = 0
+        bearish_score = 0
+        reasons = []
+
+        # 1. Forecast trend signal
+        if expected_return >= 2:
+            bullish_score += 35
+            reasons.append(
+                f"Forecasted price is {round(expected_return, 2)}% above the latest close."
+            )
+        elif expected_return <= -2:
+            bearish_score += 35
+            reasons.append(
+                f"Forecasted price is {round(abs(expected_return), 2)}% below the latest close."
+            )
+        else:
+            reasons.append(
+                "Forecasted price is close to the latest close, suggesting limited short-term movement."
+            )
+
+        # 2. RSI signal
+        if last_rsi14 < 30:
+            bullish_score += 25
+            reasons.append(
+                f"RSI is {round(last_rsi14, 2)}, which may indicate the stock is oversold."
+            )
+        elif last_rsi14 > 70:
+            bearish_score += 25
+            reasons.append(
+                f"RSI is {round(last_rsi14, 2)}, which may indicate the stock is overbought."
+            )
+        else:
+            reasons.append(
+                f"RSI is {round(last_rsi14, 2)}, which is in a neutral range."
+            )
+
+        # 3. SMA signal
+        if last_close > last_sma20:
+            bullish_score += 20
+            reasons.append(
+                "Latest close is above the 20-day moving average."
+            )
+        elif last_close < last_sma20:
+            bearish_score += 20
+            reasons.append(
+                "Latest close is below the 20-day moving average."
+            )
+        else:
+            reasons.append(
+                "Latest close is near the 20-day moving average."
+            )
+
+        # 4. Bollinger Band signal
+        if last_upper_band is not None and last_lower_band is not None:
+            if last_close <= last_lower_band:
+                bullish_score += 20
+                reasons.append(
+                    "Price is near or below the lower Bollinger Band."
+                )
+            elif last_close >= last_upper_band:
+                bearish_score += 20
+                reasons.append(
+                    "Price is near or above the upper Bollinger Band."
+                )
+            else:
+                reasons.append(
+                    "Price is trading within the Bollinger Bands."
+                )
+        else:
+            reasons.append(
+                "Bollinger Band signal was unavailable due to limited rolling-window data."
+            )
+
+        net_score = bullish_score - bearish_score
+
+        if net_score >= 25:
+            signal = "Buy"
+            confidence = min(100, 50 + net_score)
+        elif net_score <= -25:
+            signal = "Sell"
+            confidence = min(100, 50 + abs(net_score))
+        else:
+            signal = "Hold"
+            confidence = max(40, 60 - abs(net_score))
+
+        actions[str(days)] = {
+            "price": forecast_price,
+            "action": signal,
+            "confidence": int(round(confidence)),
+            "expectedReturnPercent": float(round(expected_return, 2)),
+            "bullishScore": int(bullish_score),
+            "bearishScore": int(bearish_score),
+            "reasons": reasons
+        }
+
+    return actions
+
+
 # ─── Timeout Handling ─────────────────────────────────────────────────────────
 class TimeoutException(Exception):
     pass
@@ -129,7 +268,7 @@ def cancel_arima_timeout():
 def analyze_symbol(symbol: str, start: str, end: str, spy0: float) -> dict | None:
     """
     Analyze a single symbol with SMA, RSI, Bollinger Bands, normalized comparison,
-    and a lightweight ARIMA forecast.
+    ARIMA forecast, and confidence-based Buy/Sell/Hold recommendations.
     """
     symbol = symbol.upper().strip()
     close, data_source = fetch_close(symbol, start, end)
@@ -194,25 +333,8 @@ def analyze_symbol(symbol: str, start: str, end: str, spy0: float) -> dict | Non
         for i, val in enumerate(fc, start=1)
     ]
 
-    # ─── Buy/Sell/None Recommendations ─────────────────────────────────────────
-    last_close = float(df["close"].iat[-1])
-    actions = {}
-
-    for days in (1, 7, 14):
-        forecast_index = min(days - 1, len(fc) - 1)
-        price = float(round(fc.iloc[forecast_index], 2))
-
-        if price >= last_close * 1.02:
-            act = "Buy"
-        elif price <= last_close * 0.98:
-            act = "Sell"
-        else:
-            act = "None"
-
-        actions[str(days)] = {
-            "price": price,
-            "action": act
-        }
+    # ─── Buy/Sell/Hold Recommendations with Confidence ────────────────────────
+    actions = build_signal_recommendations(close, df, fc)
 
     # ─── Normalized vs SPY ─────────────────────────────────────────────────────
     norm_vals = (close / spy0).round(3).tolist()
